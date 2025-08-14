@@ -1,72 +1,46 @@
-// ===== Imports =====
-// server.js
-import express from 'express';
-import http from 'http';
-import dotenv from 'dotenv';
-import cors from 'cors';
-import helmet from 'helmet';
-import morgan from 'morgan';
-import cookieParser from 'cookie-parser';
-import mongoose from 'mongoose';
+import express from "express";
+import dotenv from "dotenv";
+import cors from "cors";
+import mongoose from "mongoose";
+import path from "path";
+import { fileURLToPath } from "url";
 
-import { connectDB } from './config/db.js';
-import { notFound, errorHandler } from './middleware/error.js';
-
-// Routes
-import authRoutes from './routes/authRoutes.js';
-import workshopRoutes from './routes/workshopRoutes.js';
-import bookingRoutes from './routes/bookingsRoutes.js';
-import stripeRoutes from './routes/stripeRoutes.js';
-
-// Socket
-import { initSocket } from './socket.js';
-
-// ===== Config =====
 dotenv.config();
 const app = express();
 
-// ===== Middleware =====
-// Handle Stripe raw body for webhook
-app.use((req, res, next) => {
-  if (req.originalUrl.startsWith('/api/stripe/webhook')) {
-    return next();
-  }
-  express.json()(req, res, next);
+// Fix __dirname in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Middleware
+app.use(express.json());
+app.use(cors({
+  origin: process.env.CLIENT_URL?.split(",") || ["http://localhost:5173"],
+  credentials: true
+}));
+
+// Connect to MongoDB
+mongoose.connect(process.env.MONGO_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true
+})
+.then(() => console.log("✅ MongoDB connected"))
+.catch(err => console.error("❌ MongoDB connection error:", err));
+
+// Routes
+import myRoutes from "./routes/index.js";
+app.use("/api", myRoutes);
+
+// Serve frontend in production
+if (process.env.NODE_ENV === "production") {
+  app.use(express.static(path.join(__dirname, "client", "dist")));
+  app.get("*", (req, res) => {
+    res.sendFile(path.join(__dirname, "client", "dist", "index.html"));
+  });
+}
+
+// Start server
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
 });
-
-app.use(cookieParser());
-app.use(express.urlencoded({ extended: true }));
-app.use(helmet());
-app.use(morgan('dev'));
-app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
-
-// ===== Routes =====
-app.get('/', (req, res) => res.send('API is running'));
-app.use('/api/auth', authRoutes);
-app.use('/api/workshops', workshopRoutes);
-app.use('/api/bookings', bookingRoutes);
-app.use('/api/stripe', stripeRoutes);
-
-// ===== Error Handlers =====
-app.use(notFound);
-app.use(errorHandler);
-
-// ===== Start Server =====
-const startServer = async () => {
-  try {
-    await connectDB();
-
-    const server = http.createServer(app);
-    initSocket(server, process.env.CLIENT_URL);
-
-    const PORT = process.env.PORT || 5000;
-    server.listen(PORT, () => {
-      console.log(`✅ Server running on port ${PORT}`);
-    });
-  } catch (error) {
-    console.error(`❌ Server error: ${error.message}`);
-    process.exit(1);
-  }
-};
-
-startServer();
